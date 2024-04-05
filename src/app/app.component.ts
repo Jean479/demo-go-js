@@ -7,6 +7,7 @@ import { ChangeDetectorRef, Component, ViewChild, ViewEncapsulation } from '@ang
 import * as go from 'gojs';
 import { DataSyncService, DiagramComponent, PaletteComponent } from 'gojs-angular';
 import produce from "immer";
+import { DiagramService } from './diagram.service';
 
 @Component({
   selector: 'app-root',
@@ -52,11 +53,181 @@ export class AppComponent {
   public diagramDivClassName: string = 'myDiagramDiv';
   public paletteDivClassName = 'myPaletteDiv';
 
+  // this is called upon an external drop in this diagram,
+  // after a new node has been created and selected
+  onDrop(newNode, point) {
+    const myDiagram = this.myDiagramComponent.diagram;
+
+    // look for a drop directly onto a Node or Link
+    const it = myDiagram.findPartsAt(point).iterator;
+    while (it.next()) {
+      const part = it.value;
+      if (part === newNode) continue;
+      // the drop happened on some Part -- call its mouseDrop handler
+      if (part && part.mouseDrop) {
+        const e = new go.InputEvent();
+        e.diagram = myDiagram;
+        e.documentPoint = point;
+        e.viewPoint = myDiagram.transformDocToView(point);
+        e.up = true;
+        myDiagram.lastInput = e;
+        // should be running in a transaction already
+        part.mouseDrop(e, part);
+        return;
+      }
+    }
+    // didn't find anything to drop onto
+  }
+ // this is called on a stationary node or link during an external drag-and-drop into a Diagram
+ onHighlight(part) {  // may be null
+  const myDiagram = this.diagramService.myDiagram;
+  const oldskips = myDiagram.skipsUndoManager;
+  myDiagram.skipsUndoManager = true;
+  myDiagram.startTransaction("highlight");
+  if (part !== null) {
+    myDiagram.highlight(part);
+  } else {
+    myDiagram.clearHighlighteds();
+  }
+  myDiagram.commitTransaction("highlight");
+  myDiagram.skipsUndoManager = oldskips;
+ }
+ 
+  attachListener() {
+   // const div = this.myDiagramComponent.diagramDiv.nativeElement;
+    document.addEventListener("dragstart", (event: any) => {
+      if (event.target.className !== "draggable") return;
+      console.log(' ici et la');
+      this.diagramService.dragged = event.target;      
+      this.diagramService.dragged.offsetX = event.offsetX - this.diagramService.dragged.clientWidth / 2;
+      this.diagramService.dragged.offsetY = event.offsetY - this.diagramService.dragged.clientHeight / 2;
+      // Objects during drag will have a red border
+      event.target.style.border = "2px solid red";
+    });
+ 
+    document.addEventListener("dragenter", event => {
+      // Here you could also set effects on the Diagram,
+      // such as changing the background color to indicate an acceptable drop zone
+  
+      // Requirement in some browsers, such as Internet Explorer
+      console.log(' ciiiii');
+      
+      event.preventDefault();
+    }, false);
+
+    document.addEventListener("dragover", event => {
+      console.log(' event draggover');
+      const myDiagram = this.diagramService.myDiagram;
+      const can = event.target;
+      const pixelratio = myDiagram.computePixelRatio();
+
+      // if the target is not the canvas, we may have trouble, so just quit:
+      if (!(can instanceof HTMLCanvasElement)) return;
+
+      const bbox = can.getBoundingClientRect();
+      let bbw = bbox.width;
+      if (bbw === 0) bbw = 0.001;
+      let bbh = bbox.height;
+      if (bbh === 0) bbh = 0.001;
+      const mx = event.clientX - bbox.left * ((can.width / pixelratio) / bbw);
+      const my = event.clientY - bbox.top * ((can.height / pixelratio) / bbh);
+      const point = myDiagram.transformViewToDoc(new go.Point(mx, my));
+      const part = myDiagram.findPartAt(point, true);
+      this.onHighlight(part);
+      //@ts-ignore
+      if (event.target.className === "dropzone") {
+        console.log(' drop zone');
+        
+        // Disallow a drop by returning before a call to preventDefault:
+        return;
+      }
+
+      event.preventDefault();
+    }, false);
+
+    document.addEventListener("drop", event => {
+      // const myDiv = this.myDiagramComponent.diagramDiv.nativeElement;
+      const myDiagram = this.myDiagramComponent.diagram;
+      console.log(' drop: ', myDiagram.div);
+      
+      // prevent default action
+      // (open as link for some elements in some browsers)
+      event.preventDefault();
+  
+      // Dragging onto a Diagram
+      //if (div === myDiv.div)
+         {
+        console.log(' laaaaaa:', event.target);
+        console.log(' laaaaaa:', this.diagramService.dragged.offsetX);
+        const can = event.target;
+        
+        const pixelratio = myDiagram.computePixelRatio();
+  
+        // if the target is not the canvas, we may have trouble, so just quit:
+        if (!(can instanceof HTMLCanvasElement)) return;
+  
+        const bbox = can.getBoundingClientRect();
+        let bbw = bbox.width;
+        if (bbw === 0) bbw = 0.001;
+        let bbh = bbox.height;
+        if (bbh === 0) bbh = 0.001;
+        const mx = event.clientX - bbox.left * ((can.width / pixelratio) / bbw);
+        const my = event.clientY - bbox.top * ((can.height / pixelratio) / bbh);
+        const point = myDiagram.transformViewToDoc(new go.Point(mx, my));
+        console.log('point:', point);
+        
+        // // if there's nothing at that point
+        // if (myDiagram.findPartAt(point) === null) {
+        //   // a return here doesn't allow the drop to happen
+        //   return;
+        // }
+        // otherwise create a new node at the drop point 
+        myDiagram.startTransaction('new node');
+        const newdata = {
+          // assuming the locationSpot is Spot.Center:
+          location: myDiagram.transformViewToDoc(new go.Point(mx - this.diagramService.dragged.offsetX, my - this.diagramService.dragged.offsetY)),
+          text: event.dataTransfer.getData('text'),
+          color: "lightyellow"
+        };
+        myDiagram.model.addNodeData(newdata);
+        const newnode = myDiagram.findNodeForData(newdata);
+        if (newnode) {
+          newnode.ensureBounds();
+          myDiagram.select(newnode);
+          this.onDrop(newnode, point);
+        }
+        myDiagram.commitTransaction('new node');
+  
+        // remove dragged element from its old location, if checkbox is checked
+        //if (document.getElementById('removeCheckBox').checked) dragged.parentNode.removeChild(dragged);
+      }
+  
+      // If we were using drag data, we could get it here, ie:
+      // const data = event.dataTransfer.getData('text');
+    }, false);
+  
+  }
+  // Decide whether a link from node1 to node2 may be created by a drop operation
+  public mayConnect(node1, node2) {
+    return node1 !== node2;
+  }
+
+  inv() {
+    const diag = this.diagramService.myDiagram as go.Diagram;
+    diag.layout.isOngoing = false;
+    //diag.layout.invalidateLayout();
+    //diag.layout.isOngoing = false;
+  }
+
   // initialize diagram / templates
   public initDiagram(): go.Diagram {
 
     const $ = go.GraphObject.make;
     const dia = $(go.Diagram, {
+      //layout: $(go.TreeLayout),
+      
+      //layout: $(go.ForceDirectedLayout),
+      layout: new go.TreeLayout({ angle: 90, layerSpacing: 35 }),
       'undoManager.isEnabled': true,
       'clickCreatingTool.archetypeNodeData': { text: 'new node', color: 'lightblue' },
       model: $(go.GraphLinksModel,
@@ -82,9 +253,54 @@ export class AppComponent {
       );
     }
 
+    dia.linkTemplate =
+    $(go.Link,
+      // two path Shapes: the transparent one becomes visible during mouse-over
+      $(go.Shape, { isPanelMain: true, strokeWidth: 6, stroke: "transparent" },
+        new go.Binding("stroke", "isHighlighted", h => h ? "red" : "transparent").ofObject()),
+      $(go.Shape, { isPanelMain: true, strokeWidth: 1 }),
+      $(go.Shape, { toArrow: "Standard" }),
+      { // on mouse-over, highlight the link
+        //@ts-ignore
+        mouseDragEnter: (e, link) => link.isHighlighted = true,
+        //@ts-ignore
+        mouseDragLeave: (e, link) => link.isHighlighted = false,
+        // on a mouse-drop splice the new node in between the dropped-upon link's fromNode and toNode
+        mouseDrop: (e, link: any) => {
+          const oldto = link.toNode;
+          const newnode = e.diagram.selection.first();
+          if (! (newnode !== oldto)) return;
+          if (! (link.fromNode !== newnode)) return;
+          link.toNode = newnode;
+        //@ts-ignore
+          e.diagram.model.addLinkData({ from: newnode.key, to: oldto.key });
+        }
+      }
+    );
+
     // define the Node template
     dia.nodeTemplate =
       $(go.Node, 'Spot',
+      { locationSpot: go.Spot.Center },
+      { // on mouse-over, highlight the node
+        //@ts-ignore
+        mouseDragEnter: (e, node) => node.isHighlighted = true,
+        //@ts-ignore
+        mouseDragLeave: (e, node) => node.isHighlighted = false,
+        // on a mouse-drop add a link from the dropped-upon node to the new node
+        mouseDrop: (e, node) => {
+          
+          const newnode = e.diagram.selection.first();
+          if (!(node!==newnode)) return;
+          //@ts-ignore
+          const incoming = newnode.findLinksInto().first();
+          if (incoming) e.diagram.remove(incoming);
+          //@ts-ignore
+          e.diagram.model.addLinkData( { from: node.key, to: newnode.key });
+          console.log(" fin ");
+          
+        }
+      },
         {
           contextMenu:
             $('ContextMenu',
@@ -97,13 +313,22 @@ export class AppComponent {
             )
         },
         new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+        
         $(go.Panel, 'Auto',
           $(go.Shape, 'RoundedRectangle', { stroke: null },
             new go.Binding('fill', 'color', (c, panel) => {
              
               return c;
-            })
+            }),
+          
+            new go.Binding("fill", "isHighlighted", (h, shape) => {
+              if (h) return "red";
+              const c = shape.part.data.color;
+              return c ? c : "white";
+            }).ofObject(),
           ),
+          
+          
           $(go.TextBlock, { margin: 8, editable: true },
             new go.Binding('text').makeTwoWay())
         ),
@@ -167,7 +392,7 @@ export class AppComponent {
     return palette;
   }
 
-  constructor(private cdr: ChangeDetectorRef) { }
+  constructor(private cdr: ChangeDetectorRef, private diagramService: DiagramService) { }
 
   // Overview Component testing
   public oDivClassName = 'myOverviewDiv';
@@ -184,6 +409,10 @@ export class AppComponent {
   public ngAfterViewInit() {
     if (this.observedDiagram) return;
     this.observedDiagram = this.myDiagramComponent.diagram;
+
+    this.diagramService.myDiagram =this.observedDiagram;
+
+    this.attachListener();
     this.cdr.detectChanges(); // IMPORTANT: without this, Angular will throw ExpressionChangedAfterItHasBeenCheckedError (dev mode only)
 
     const appComp: AppComponent = this;

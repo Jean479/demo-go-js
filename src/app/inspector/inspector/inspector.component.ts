@@ -5,7 +5,7 @@ import * as go from 'gojs';
 @Component({
   selector: 'app-inspector',
   templateUrl: './inspector.component.html',
-  styleUrls: ['./inspector.component.css']
+  styleUrls: ['./inspector.component.scss']
 })
 export class InspectorComponent {
 

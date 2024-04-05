@@ -23,7 +23,10 @@
 <div class="left">
   <app-inspector [nodeData]='state.selectedNodeData' (onInspectorChange)='handleInspectorChange($event)'></app-inspector>
 </div>
-
+<div class="left">
+  <button (click)="inv()">inv</button>
+  <app-palette></app-palette>
+</div>
 
 <div class="clear left box">
   <h3>Links in app data</h3>

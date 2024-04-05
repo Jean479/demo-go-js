@@ -7,12 +7,14 @@ import { AppComponent } from './app.component';
 import { FormsModule } from '@angular/forms';
 import { InspectorComponent } from './inspector/inspector/inspector.component';
 import { InspectorRowComponent } from './inspector/inspector-row/inspector-row.component';
+import { PaletteComponent } from './palette/palette.component';
 
 @NgModule({
   declarations: [
     AppComponent,
     InspectorComponent,
-    InspectorRowComponent
+    InspectorRowComponent,
+    PaletteComponent
   ],
   imports: [
     BrowserModule,
